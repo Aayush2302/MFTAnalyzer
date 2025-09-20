@@ -1,7 +1,7 @@
 # app/gui_home.py
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
-import gui_generate
-import gui_explore
+import app.gui_generate as gui_generate
+import app.gui_explore as gui_explore
 
 class HomePage(QWidget):
     def __init__(self, parent=None):

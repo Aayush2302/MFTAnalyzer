@@ -3,17 +3,37 @@ import os
 import time
 import string
 import subprocess
+import sys
+import ctypes
 import pandas as pd
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton,
-    QFileDialog, QMessageBox, QDialog, QHBoxLayout, QTextEdit,
+    QFileDialog, QMessageBox, QDialog, QTextEdit,
     QProgressBar, QApplication
 )
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
-from gui_dash import MFTAnalyzer as DashboardPage
-from gui_home import HomePage 
+from app.gui_dash import MFTAnalyzer as DashboardPage
+from app.gui_home import HomePage  
+
+
+def resource_path(relative_path):
+    """Get absolute path to resource (works for dev, onedir, onefile)"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)  # onefile mode
+    return os.path.join(os.path.abspath("."), relative_path)  # dev/onedir mode
+
+
+def is_admin():
+    """Check if the program is running with admin rights"""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+
+rawcopy_path = resource_path("tools/RawCopy.exe")
+mftecmd_path = resource_path("tools/MFTECmd.exe")
 
 
 class ProgressDialog(QDialog):
@@ -96,10 +116,15 @@ class MFTGeneratorThread(QThread):
             self.status_update.emit("Generating MFT.bin file...", 10)
             self.terminal_update.emit(f"Starting MFT generation for drive {self.drive}")
             self.terminal_update.emit(f"Output path: {self.save_path}")
-            
-            # Run RawCopy with Admin rights
+
+            if not is_admin():
+                self.terminal_update.emit("ERROR: Program is not running as administrator!")
+                self.finished_error.emit("Administrator rights are required to run RawCopy.")
+                return
+
+            # Run RawCopy with full path & admin
             ps_command = (
-                f'Start-Process "tools/RawCopy.exe" '
+                f'Start-Process "{rawcopy_path}" '
                 f'-ArgumentList \'/FileNamePath:{self.drive}\\$MFT\',\'/OutputPath:{save_folder}\',\'/OutputName:{save_name}\' '
                 f'-Verb RunAs -Wait'
             )
@@ -146,7 +171,7 @@ class MFTGeneratorThread(QThread):
             self.terminal_update.emit(f"Output CSV folder: {save_csv_folder}")
             
             process = subprocess.run([
-                "tools/MFTECmd.exe",
+                mftecmd_path,
                 "-f", self.save_path,
                 "--csv", save_csv_folder
             ], capture_output=True, text=True)
@@ -277,12 +302,11 @@ class GeneratePage(QWidget):
         QMessageBox.information(
             self,
             "Success",
-            f"MFT generated and converted successfully!"
+            "MFT generated and converted successfully!"
         )
 
-        # ✅ After user presses OK → go back to Home page
+        # ✅ After user presses OK → exit program
         QApplication.quit()
-
 
     def on_generation_error(self, error_message):
         """Handle MFT generation error"""
@@ -311,40 +335,31 @@ class GeneratePage(QWidget):
 
     def show_home_page(self):
         """Return to home page after generation"""
-        # Close this dialog/window and show home page
         if self.parent:
-            # If there's a parent with a method to show home page
             if hasattr(self.parent, 'show_home_page'):
                 self.parent.show_home_page()
             elif hasattr(self.parent, 'stacked_widget'):
-                # If parent has a stacked widget, go to index 0 (assuming home is first)
                 self.parent.stacked_widget.setCurrentIndex(0)
-            # Close the current dialog
             self.parent.close()
         else:
             self.close()
 
     def close_dialog(self):
         """Close the generate dialog/window"""
-        # Clean up any running processes
         if self.worker_thread and self.worker_thread.isRunning():
             self.worker_thread.quit()
             self.worker_thread.wait()
         
-        # Close progress dialog if open
         if self.progress_dialog:
             self.progress_dialog.close()
         
-        # If this widget has a parent window (like a main window), close it
         if self.parent:
             self.parent.close()
         else:
-            # If this is the main window or standalone, close self
             self.close()
 
     def closeEvent(self, event):
         """Handle window close event"""
-        # Clean up any running processes before closing
         if self.worker_thread and self.worker_thread.isRunning():
             reply = QMessageBox.question(
                 self, 

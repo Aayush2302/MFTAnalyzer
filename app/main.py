@@ -1,12 +1,15 @@
 # app/main.py
-import sys
+import sys,os
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QPushButton, QFileDialog, QMessageBox
 )
 
-from gui_generate import GeneratePage
-from gui_dash import MFTAnalyzer as DashboardPage
+from app.gui_generate import GeneratePage
+from app.gui_dash import MFTAnalyzer as DashboardPage
 
 
 class MainWindow(QMainWindow):

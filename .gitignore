@@ -1,0 +1,44 @@
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+MFTAnalyzer/
+.env/
+.venv/
+.MFTAnalyzer/
+
+# PyInstaller build outputs
+build/
+dist/
+*.spec
+
+# Installer outputs
+Output/
+setup_mft_analyzer.exe
+
+# Logs / temp files
+*.log
+*.tmp
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+*.ipynb
+
+# VSCode / PyCharm / IDE configs
+.vscode/
+.idea/
+
+# Windows system files
+Thumbs.db
+Desktop.ini
+
+# Mac system files
+.DS_Store
+
+# Tools output (generated CSVs / bins)
+*.bin
+*_csv/
+*.csv
+*.iss

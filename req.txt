@@ -1,0 +1,6 @@
+pyinstaller==5.13.0
+pyqt5==5.15.9
+pandas==1.5.3
+numpy==1.23.5
+matplotlib==3.6.3
+plotly==5.13.1

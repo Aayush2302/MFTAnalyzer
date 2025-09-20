@@ -1,6 +1,6 @@
 # app/gui_explore.py
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
-from gui_dash import MFTAnalyzer as DashboardPage
+from app.gui_dash import MFTAnalyzer as DashboardPage
 
 class ExplorePage(QWidget):
     def __init__(self, parent=None):
