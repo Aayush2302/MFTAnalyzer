@@ -60,9 +60,38 @@ Both tools are bundled with the application inside the `tools/` directory.
 
 - Download `MFTAnalyzer.exe` and Open with `Run as Administrator`
 
+## 🛠️ Troubleshooting
+
+If you face issues running **MFT Analyzer.exe**, check the following:
+
+### 1. Run as Administrator
+RawCopy requires direct disk access.  
+Always launch `MFTAnalyzer.exe` with **administrator privileges**:  
+- Right-click → **Run as Administrator**  
+- Or set it permanently via:  
+  - Right-click `MFTAnalyzer.exe` → **Properties** → **Compatibility** →  
+    Check **Run this program as administrator**
+
 ---
 
-### 📜 License & Disclaimer
+### 2. Install .NET Framework 4.6 or Higher
+`MFTECmd.exe` requires **.NET Framework 4.6+**.  
+
+#### Check if it’s already installed
+Open **Command Prompt** and run:
+```cmd
+reg query "HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" /v Release
+```
+
+Install .NET 4.8 (recommended)
+Run in PowerShell (Admin):
+```cmd
+curl.exe -L -o dotnet48.exe https://download.microsoft.com/download/9/5/E/95E1E9F9-4F2F-46F9-8E9E-4E96D5B8BC6B/ndp48-x86-x64-allos-enu.exe
+start /wait dotnet48.exe /quiet /norestart
+```
+---
+
+## 📜 License & Disclaimer
 
 MFT Analyzer is provided for educational and authorized forensic use only.
 
