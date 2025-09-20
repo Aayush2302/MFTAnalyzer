@@ -1,33 +1,40 @@
 # app/gui_explore.py
-import tkinter as tk
-from tkinter import filedialog, messagebox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
 from gui_dash import MFTAnalyzer as DashboardPage
 
-class ExplorePage:
-    def __init__(self, root):
-        self.root = root
-        self.frame = tk.Frame(root, padx=20, pady=20)
-        self.frame.pack(expand=True)
+class ExplorePage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        layout = QVBoxLayout()
 
         # Title
-        tk.Label(self.frame, text="Explore Existing MFT CSV", font=("Arial", 14, "bold")).pack(pady=10)
+        title = QLabel("Explore Existing MFT CSV")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
+        layout.addWidget(title)
 
         # Instruction
-        tk.Label(self.frame, text="Select an existing CSV file to explore:").pack(pady=5)
+        instruction = QLabel("Select an existing CSV file to explore:")
+        layout.addWidget(instruction)
 
         # Button to choose CSV
-        choose_btn = tk.Button(self.frame, text="Choose CSV File", command=self.choose_csv)
-        choose_btn.pack(pady=10)
+        choose_btn = QPushButton("Choose CSV File")
+        choose_btn.clicked.connect(self.choose_csv)
+        layout.addWidget(choose_btn)
+
+        self.setLayout(layout)
 
     def choose_csv(self):
-        """Open file dialog to select an existing CSV and load into Dashboard"""
-        csv_file = filedialog.askopenfilename(
-            title="Select MFT CSV File",
-            filetypes=[("CSV Files", "*.csv")]
+        csv_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select MFT CSV File",
+            "",
+            "CSV Files (*.csv)"
         )
+
         if csv_file:
             try:
-                # ✅ Open Dashboard with chosen CSV
-                DashboardPage(csv_file)
+                dashboard = DashboardPage(csv_file)
+                dashboard.show()
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to load Dashboard:\n{e}")
+                QMessageBox.critical(self, "Error", f"Failed to load Dashboard:\n{e}")

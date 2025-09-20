@@ -1,104 +1,364 @@
-# app/gui_dashboard.py
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import pandas as pd
+# app/gui_generate.py
 import os
+import time
+import string
+import subprocess
+import pandas as pd
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QComboBox, QPushButton,
+    QFileDialog, QMessageBox, QDialog, QHBoxLayout, QTextEdit,
+    QProgressBar, QApplication
+)
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
+from PyQt5.QtGui import QFont
 
-class DashboardPage:
-    def __init__(self, root, csv_file):
-        self.root = root
-        self.csv_file = csv_file
-        self.frame = tk.Frame(root, padx=10, pady=10)
-        self.frame.pack(fill="both", expand=True)
+from gui_dash import MFTAnalyzer as DashboardPage
+from gui_home import HomePage 
+
+
+class ProgressDialog(QDialog):
+    """Custom progress dialog with terminal output"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("MFT Generation Progress")
+        self.setModal(True)
+        self.resize(600, 400)
+        
+        layout = QVBoxLayout()
+        
+        # Status label
+        self.status_label = QLabel("Initializing...")
+        self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
+        layout.addWidget(self.status_label)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+        
+        # Terminal output
+        terminal_label = QLabel("Terminal Output:")
+        terminal_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(terminal_label)
+        
+        self.terminal_output = QTextEdit()
+        self.terminal_output.setReadOnly(True)
+        self.terminal_output.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+                border: 1px solid #444444;
+            }
+        """)
+        layout.addWidget(self.terminal_output)
+        
+        self.setLayout(layout)
+        
+        # Prevent closing during operation
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
+    
+    def update_status(self, status, progress=None):
+        """Update status label and optional progress"""
+        self.status_label.setText(status)
+        if progress is not None:
+            self.progress_bar.setValue(progress)
+    
+    def append_terminal(self, text):
+        """Append text to terminal output"""
+        self.terminal_output.append(text)
+        # Auto-scroll to bottom
+        cursor = self.terminal_output.textCursor()
+        cursor.movePosition(cursor.End)
+        self.terminal_output.setTextCursor(cursor)
+
+
+class MFTGeneratorThread(QThread):
+    """Worker thread for MFT generation"""
+    status_update = pyqtSignal(str, int)  # status, progress
+    terminal_update = pyqtSignal(str)
+    finished_success = pyqtSignal(str)  # csv_file_path
+    finished_error = pyqtSignal(str)  # error_message
+    
+    def __init__(self, drive, save_path):
+        super().__init__()
+        self.drive = drive
+        self.save_path = save_path
+    
+    def run(self):
+        try:
+            save_folder = os.path.dirname(self.save_path)
+            save_name = os.path.basename(self.save_path)
+            
+            # Step 1: Generate MFT.bin
+            self.status_update.emit("Generating MFT.bin file...", 10)
+            self.terminal_update.emit(f"Starting MFT generation for drive {self.drive}")
+            self.terminal_update.emit(f"Output path: {self.save_path}")
+            
+            # Run RawCopy with Admin rights
+            ps_command = (
+                f'Start-Process "tools/RawCopy.exe" '
+                f'-ArgumentList \'/FileNamePath:{self.drive}\\$MFT\',\'/OutputPath:{save_folder}\',\'/OutputName:{save_name}\' '
+                f'-Verb RunAs -Wait'
+            )
+            
+            self.terminal_update.emit("Executing RawCopy command...")
+            self.terminal_update.emit(f"Command: {ps_command}")
+            
+            process = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
+                capture_output=True,
+                text=True
+            )
+            
+            if process.returncode != 0:
+                self.terminal_update.emit(f"RawCopy stderr: {process.stderr}")
+                raise subprocess.CalledProcessError(process.returncode, "RawCopy")
+            
+            self.terminal_update.emit("RawCopy completed successfully")
+            self.status_update.emit("Waiting for MFT.bin file creation...", 30)
+            
+            # Wait until file exists
+            timeout = 60
+            waited = 0
+            while (not os.path.exists(self.save_path) or os.path.getsize(self.save_path) == 0) and waited < timeout:
+                self.terminal_update.emit(f"Waiting for file... ({waited}/{timeout}s)")
+                time.sleep(2)
+                waited += 2
+                progress = 30 + (waited / timeout * 20)  # 30-50%
+                self.status_update.emit(f"Waiting for MFT.bin file creation... ({waited}s)", int(progress))
+            
+            if not os.path.exists(self.save_path) or os.path.getsize(self.save_path) == 0:
+                self.terminal_update.emit("ERROR: MFT.bin file was not created or is empty")
+                self.finished_error.emit("MFT.bin file was not created.")
+                return
+            
+            file_size = os.path.getsize(self.save_path)
+            self.terminal_update.emit(f"MFT.bin created successfully (Size: {file_size:,} bytes)")
+            
+            # Step 2: Convert BIN to CSV
+            self.status_update.emit("Converting MFT.bin to CSV...", 60)
+            save_csv_folder = self.save_path.replace(".bin", "_csv")
+            
+            self.terminal_update.emit("Starting MFTECmd conversion...")
+            self.terminal_update.emit(f"Output CSV folder: {save_csv_folder}")
+            
+            process = subprocess.run([
+                "tools/MFTECmd.exe",
+                "-f", self.save_path,
+                "--csv", save_csv_folder
+            ], capture_output=True, text=True)
+            
+            if process.returncode != 0:
+                self.terminal_update.emit(f"MFTECmd stderr: {process.stderr}")
+                raise subprocess.CalledProcessError(process.returncode, "MFTECmd")
+            
+            self.terminal_update.emit("MFTECmd completed successfully")
+            self.status_update.emit("Locating generated CSV file...", 80)
+            
+            # Find the actual CSV file inside the folder
+            csv_file = None
+            if os.path.exists(save_csv_folder):
+                for file in os.listdir(save_csv_folder):
+                    if file.endswith(".csv"):
+                        csv_file = os.path.join(save_csv_folder, file)
+                        self.terminal_update.emit(f"Found CSV file: {csv_file}")
+                        break
+            
+            if csv_file:
+                csv_size = os.path.getsize(csv_file)
+                self.terminal_update.emit(f"CSV file size: {csv_size:,} bytes")
+                self.status_update.emit("MFT generation completed successfully!", 100)
+                self.terminal_update.emit("=== MFT GENERATION COMPLETED SUCCESSFULLY ===")
+                self.finished_success.emit(csv_file)
+            else:
+                self.terminal_update.emit("ERROR: CSV file not found in output folder")
+                self.finished_error.emit("CSV file not found in output folder!")
+                
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Tool execution error: {e}"
+            self.terminal_update.emit(f"ERROR: {error_msg}")
+            self.finished_error.emit(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error: {e}"
+            self.terminal_update.emit(f"ERROR: {error_msg}")
+            self.finished_error.emit(error_msg)
+
+
+class GeneratePage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent  # Store reference to parent
+        self.progress_dialog = None
+        self.worker_thread = None
+
+        layout = QVBoxLayout()
 
         # Title
-        tk.Label(self.frame, text="MFT Dashboard", font=("Arial", 16, "bold")).pack(pady=10)
+        title = QLabel("Generate $MFT File")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
+        layout.addWidget(title)
 
-        # Load CSV into DataFrame
-        try:
-            self.df = pd.read_csv(csv_file, low_memory=False)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load CSV:\n{e}")
+        # Drive selection
+        drive_label = QLabel("Select Drive:")
+        layout.addWidget(drive_label)
+
+        self.drive_combo = QComboBox()
+        self.drive_combo.addItems(self.list_drives())
+        layout.addWidget(self.drive_combo)
+
+        # Save location
+        self.save_path = None
+        save_btn = QPushButton("Choose Save Location")
+        save_btn.clicked.connect(self.choose_save_path)
+        layout.addWidget(save_btn)
+
+        # Run button
+        self.run_btn = QPushButton("Generate MFT")
+        self.run_btn.clicked.connect(self.generate_mft)
+        layout.addWidget(self.run_btn)
+
+        self.setLayout(layout)
+
+    def list_drives(self):
+        """List available drives on Windows"""
+        drives = []
+        for letter in string.ascii_uppercase:
+            if os.path.exists(f"{letter}:\\"):
+                drives.append(f"{letter}:")
+        return drives
+
+    def choose_save_path(self):
+        """Ask user which folder to save MFT.bin"""
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Save MFT")
+        if folder:
+            self.save_path = os.path.join(folder, "MFT.bin")
+
+    def generate_mft(self):
+        """Start MFT generation process"""
+        drive = self.drive_combo.currentText()
+        save_bin = self.save_path
+
+        if not drive:
+            QMessageBox.critical(self, "Error", "Please select a drive.")
+            return
+        if not save_bin:
+            QMessageBox.critical(self, "Error", "Please choose save location.")
             return
 
-        # Search Bar
-        search_frame = tk.Frame(self.frame)
-        search_frame.pack(fill="x", pady=5)
+        # Disable the generate button during processing
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("Generating...")
 
-        tk.Label(search_frame, text="Search FileName:").pack(side="left", padx=5)
-        self.search_var = tk.StringVar()
-        search_entry = tk.Entry(search_frame, textvariable=self.search_var, width=40)
-        search_entry.pack(side="left", padx=5)
-        tk.Button(search_frame, text="Search", command=self.search_file).pack(side="left", padx=5)
-        tk.Button(search_frame, text="Show Deleted", command=self.show_deleted).pack(side="left", padx=5)
-        tk.Button(search_frame, text="Export Filtered", command=self.export_filtered).pack(side="left", padx=5)
+        # Create and show progress dialog
+        self.progress_dialog = ProgressDialog(self)
+        self.progress_dialog.show()
 
-        # Treeview (Table)
-        self.tree = ttk.Treeview(self.frame, show="headings")
-        self.tree.pack(fill="both", expand=True, pady=10)
+        # Create worker thread
+        self.worker_thread = MFTGeneratorThread(drive, save_bin)
+        
+        # Connect signals
+        self.worker_thread.status_update.connect(self.progress_dialog.update_status)
+        self.worker_thread.terminal_update.connect(self.progress_dialog.append_terminal)
+        self.worker_thread.finished_success.connect(self.on_generation_success)
+        self.worker_thread.finished_error.connect(self.on_generation_error)
+        
+        # Start the worker thread
+        self.worker_thread.start()
 
-        # Scrollbars
-        vsb = ttk.Scrollbar(self.frame, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(self.frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
-        vsb.pack(side="right", fill="y")
-        hsb.pack(side="bottom", fill="x")
+    def on_generation_success(self, csv_file):
+        """Handle successful MFT generation"""
+        # Clean up
+        self.cleanup_generation()
 
-        # Choose essential columns
-        essential_cols = [
-            "RecordNumber", "ParentPath", "FileName", "SI Creation", 
-            "SI Modified", "SI Accessed", "FN Created", "Size", "Deleted"
-        ]
-        self.columns = [col for col in essential_cols if col in self.df.columns]
-
-        self.tree["columns"] = self.columns
-        for col in self.columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=150, anchor="w")
-
-        # Initially load all rows
-        self.load_table(self.df)
-
-    def load_table(self, dataframe):
-        """Load dataframe into the Treeview"""
-        self.tree.delete(*self.tree.get_children())  # clear table
-        for _, row in dataframe.iterrows():
-            values = [row.get(col, "") for col in self.columns]
-            self.tree.insert("", "end", values=values)
-
-    def search_file(self):
-        """Search FileName in DataFrame"""
-        keyword = self.search_var.get().lower()
-        if not keyword:
-            self.load_table(self.df)
-            return
-        filtered = self.df[self.df["FileName"].astype(str).str.lower().str.contains(keyword, na=False)]
-        self.load_table(filtered)
-
-    def show_deleted(self):
-        """Show only deleted files"""
-        if "Deleted" not in self.df.columns:
-            messagebox.showerror("Error", "CSV does not contain 'Deleted' column")
-            return
-        filtered = self.df[self.df["Deleted"].astype(str).str.lower() == "true"]
-        self.load_table(filtered)
-
-    def export_filtered(self):
-        """Export the currently shown table to CSV"""
-        children = self.tree.get_children()
-        if not children:
-            messagebox.showerror("Error", "No data to export")
-            return
-
-        save_path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+        # Show success message and wait for user to press OK
+        QMessageBox.information(
+            self,
+            "Success",
+            f"MFT generated and converted successfully!"
         )
-        if not save_path:
-            return
 
-        data = []
-        for child in children:
-            data.append(self.tree.item(child)["values"])
-        export_df = pd.DataFrame(data, columns=self.columns)
-        export_df.to_csv(save_path, index=False)
-        messagebox.showinfo("Success", f"Filtered data exported to:\n{save_path}")
+        # ✅ After user presses OK → go back to Home page
+        QApplication.quit()
+
+
+    def on_generation_error(self, error_message):
+        """Handle MFT generation error"""
+        # Clean up
+        self.cleanup_generation()
+        
+        # Show error message
+        QMessageBox.critical(self, "Error", f"MFT generation failed:\n{error_message}")
+
+    def cleanup_generation(self):
+        """Clean up after generation (success or failure)"""
+        # Close progress dialog
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        
+        # Clean up worker thread
+        if self.worker_thread:
+            self.worker_thread.quit()
+            self.worker_thread.wait()
+            self.worker_thread = None
+        
+        # Re-enable the generate button
+        self.run_btn.setEnabled(True)
+        self.run_btn.setText("Generate MFT")
+
+    def show_home_page(self):
+        """Return to home page after generation"""
+        # Close this dialog/window and show home page
+        if self.parent:
+            # If there's a parent with a method to show home page
+            if hasattr(self.parent, 'show_home_page'):
+                self.parent.show_home_page()
+            elif hasattr(self.parent, 'stacked_widget'):
+                # If parent has a stacked widget, go to index 0 (assuming home is first)
+                self.parent.stacked_widget.setCurrentIndex(0)
+            # Close the current dialog
+            self.parent.close()
+        else:
+            self.close()
+
+    def close_dialog(self):
+        """Close the generate dialog/window"""
+        # Clean up any running processes
+        if self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.quit()
+            self.worker_thread.wait()
+        
+        # Close progress dialog if open
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        
+        # If this widget has a parent window (like a main window), close it
+        if self.parent:
+            self.parent.close()
+        else:
+            # If this is the main window or standalone, close self
+            self.close()
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # Clean up any running processes before closing
+        if self.worker_thread and self.worker_thread.isRunning():
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Close", 
+                "MFT generation is in progress. Are you sure you want to close?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.worker_thread.quit()
+                self.worker_thread.wait()
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()

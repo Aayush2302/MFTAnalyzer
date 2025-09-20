@@ -1,33 +1,33 @@
 # app/gui_home.py
-import tkinter as tk
-from tkinter import messagebox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 import gui_generate
 import gui_explore
 
-class HomePage:
-    def __init__(self, root):
-        self.root = root
-        self.frame = tk.Frame(root, padx=20, pady=20)
-        self.frame.pack(expand=True)
+class HomePage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        layout = QVBoxLayout()
 
         # Title
-        title = tk.Label(self.frame, text="MFT Tool", font=("Arial", 16, "bold"))
-        title.pack(pady=10)
+        title = QLabel("MFT Tool")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; margin: 10px;")
+        layout.addWidget(title)
 
         # Button: Generate MFT
-        gen_btn = tk.Button(self.frame, text="1. Generate $MFT File",
-                            font=("Arial", 12), width=25, command=self.open_generate)
-        gen_btn.pack(pady=10)
+        gen_btn = QPushButton("1. Generate $MFT File")
+        gen_btn.clicked.connect(self.open_generate)
+        layout.addWidget(gen_btn)
 
         # Button: Explore Existing
-        explore_btn = tk.Button(self.frame, text="2. Explore Existing MFT File",
-                                font=("Arial", 12), width=25, command=self.open_explore)
-        explore_btn.pack(pady=10)
+        explore_btn = QPushButton("2. Explore Existing MFT File")
+        explore_btn.clicked.connect(self.open_explore)
+        layout.addWidget(explore_btn)
+
+        self.setLayout(layout)
 
     def open_generate(self):
-        self.frame.destroy()
-        gui_generate.GeneratePage(self.root)
+        self.parent().setCentralWidget(gui_generate.GeneratePage(self.parent()))
 
     def open_explore(self):
-        self.frame.destroy()
-        gui_explore.ExplorePage(self.root)
+        self.parent().setCentralWidget(gui_explore.ExplorePage(self.parent()))

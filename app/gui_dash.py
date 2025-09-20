@@ -54,10 +54,10 @@ class MFTTableModel(QAbstractTableModel):
             return str(value)
         
         elif role == Qt.BackgroundRole:
-            # Highlight deleted files
-            if 'IsDeleted' in self._headers:
-                deleted_col = self._headers.index('IsDeleted')
-                if self._data.iloc[index.row(), deleted_col]:
+            # Highlight deleted files based on InUse flag
+            if 'InUse' in self._headers:
+                inuse_col = self._headers.index('InUse')
+                if not self._data.iloc[index.row(), inuse_col]:
                     return QColor(255, 200, 200)  # Light red for deleted
         
         return None
@@ -114,7 +114,7 @@ class DataLoader(QThread):
         """Preprocess and optimize the DataFrame"""
         # Convert timestamp columns
         timestamp_cols = [col for col in df.columns if any(x in col.lower() 
-                         for x in ['created', 'modified', 'accessed', 'time'])]
+                         for x in ['created', 'modified', 'access', 'change'])]
         
         for col in timestamp_cols:
             try:
@@ -128,7 +128,7 @@ class DataLoader(QThread):
         
         # Optimize data types
         for col in df.columns:
-            if df[col].dtype == 'object':
+            if df[col].dtype == 'object' and col not in timestamp_cols:
                 try:
                     # Try to convert to category for string columns with repeated values
                     if df[col].nunique() / len(df) < 0.5:  # Less than 50% unique values
@@ -149,7 +149,10 @@ class MFTAnalyzer(QMainWindow):
         self.init_ui()
         self.setup_database()
         
-    
+        # If a CSV file is provided, load it automatically
+        if csv_file:
+            self.load_csv_file(csv_file)
+        
     def load_csv_file(self, file_path):
         """Load a specific CSV file programmatically"""
         if not os.path.exists(file_path):
@@ -166,10 +169,6 @@ class MFTAnalyzer(QMainWindow):
         self.loader.finished.connect(self.on_data_loaded)
         self.loader.error.connect(self.on_load_error)
         self.loader.start()
-        
-        # If a CSV file is provided, load it automatically
-        if csv_file:
-            self.load_csv_file(csv_file)
         
     def init_ui(self):
         self.setWindowTitle("MFT CSV Analyzer - Professional Edition")
@@ -253,32 +252,32 @@ class MFTAnalyzer(QMainWindow):
         self.addToolBar(toolbar)
         
         # File operations
-        load_action = QAction("📁 Load CSV", self)
+        load_action = QAction("Load CSV", self)
         load_action.triggered.connect(self.load_csv)
         toolbar.addAction(load_action)
         
         toolbar.addSeparator()
         
         # View operations
-        refresh_action = QAction("🔄 Refresh", self)
+        refresh_action = QAction("Refresh", self)
         refresh_action.triggered.connect(self.refresh_view)
         toolbar.addAction(refresh_action)
         
-        clear_action = QAction("🗑️ Clear Filters", self)
+        clear_action = QAction("Clear Filters", self)
         clear_action.triggered.connect(self.clear_filters)
         toolbar.addAction(clear_action)
         
         toolbar.addSeparator()
         
         # Analysis operations
-        analyze_action = QAction("📊 Quick Analysis", self)
+        analyze_action = QAction("Quick Analysis", self)
         analyze_action.triggered.connect(self.quick_analysis)
         toolbar.addAction(analyze_action)
     
     def create_main_tab(self):
         """Main data view tab"""
         main_tab = QWidget()
-        self.tab_widget.addTab(main_tab, "📋 Main View")
+        self.tab_widget.addTab(main_tab, "Main View")
         layout = QVBoxLayout(main_tab)
         
         # Top controls
@@ -309,108 +308,215 @@ class MFTAnalyzer(QMainWindow):
         self.details_text.setMaximumHeight(150)
         layout.addWidget(self.details_text)
     
+    def refresh_view(self):
+        """Refresh the current view"""
+        if hasattr(self, 'update_table_view'):
+            self.update_table_view()
+        if hasattr(self, 'update_search_results'):
+            self.update_search_results()
+        if hasattr(self, 'update_record_counts'):
+            self.update_record_counts()
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("View refreshed")
+
+    def clear_filters(self):
+        """Clear all active filters"""
+    # Add this method to handle the clear filters toolbar action
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Clear filters functionality not implemented yet")
+
+    def quick_analysis(self):
+        """Run quick analysis and display in status bar"""
+        # Add this method to handle the quick analysis toolbar action
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Quick analysis functionality not implemented yet")
+    
     def create_search_tab(self):
-        """Advanced search and filtering tab"""
+        """Advanced search and filtering tab with improved layout"""
         search_tab = QWidget()
-        self.tab_widget.addTab(search_tab, "🔍 Search & Filter")
-        layout = QVBoxLayout(search_tab)
+        self.tab_widget.addTab(search_tab, "Search & Filter")
         
-        # Create search controls in a scroll area
+        # Create main splitter for left (filters) and right (results)
+        main_splitter = QSplitter(Qt.Horizontal)
+        search_layout = QVBoxLayout(search_tab)
+        search_layout.addWidget(main_splitter)
+        
+        # LEFT PANEL: FILTERS
+        filter_panel = QWidget()
+        filter_panel.setFixedWidth(400)
+        filter_layout = QVBoxLayout(filter_panel)
+        
+        # Create scroll area for filters
         scroll = QScrollArea()
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Quick search
         quick_group = QGroupBox("Quick Search")
-        quick_layout = QGridLayout(quick_group)
+        quick_layout = QVBoxLayout(quick_group)
         
         self.quick_search = QLineEdit()
         self.quick_search.setPlaceholderText("Search filename, path, or content...")
         self.quick_search.textChanged.connect(self.apply_quick_filter)
-        quick_layout.addWidget(QLabel("Search:"), 0, 0)
-        quick_layout.addWidget(self.quick_search, 0, 1, 1, 3)
+        quick_layout.addWidget(QLabel("Search:"))
+        quick_layout.addWidget(self.quick_search)
         
         scroll_layout.addWidget(quick_group)
         
-        # Advanced filters
-        advanced_group = QGroupBox("Advanced Filters")
-        advanced_layout = QGridLayout(advanced_group)
-        
         # File filters
+        file_group = QGroupBox("File Filters")
+        file_layout = QGridLayout(file_group)
+        
         self.filename_filter = QLineEdit()
         self.filename_filter.setPlaceholderText("*.txt, *.exe, etc.")
-        advanced_layout.addWidget(QLabel("Filename:"), 0, 0)
-        advanced_layout.addWidget(self.filename_filter, 0, 1)
+        file_layout.addWidget(QLabel("Filename Pattern:"), 0, 0)
+        file_layout.addWidget(self.filename_filter, 0, 1)
         
         self.extension_filter = QComboBox()
         self.extension_filter.setEditable(True)
-        self.extension_filter.setPlaceholderText("File extension")
-        advanced_layout.addWidget(QLabel("Extension:"), 0, 2)
-        advanced_layout.addWidget(self.extension_filter, 0, 3)
+        self.extension_filter.setPlaceholderText("Select extension")
+        file_layout.addWidget(QLabel("Extension:"), 1, 0)
+        file_layout.addWidget(self.extension_filter, 1, 1)
+        
+        self.path_filter = QLineEdit()
+        self.path_filter.setPlaceholderText("Enter path pattern")
+        file_layout.addWidget(QLabel("Path Contains:"), 2, 0)
+        file_layout.addWidget(self.path_filter, 2, 1)
+        
+        scroll_layout.addWidget(file_group)
         
         # Size filters
+        size_group = QGroupBox("Size Filters")
+        size_layout = QGridLayout(size_group)
+        
         self.size_min = QSpinBox()
         self.size_min.setMaximum(2147483647)
         self.size_min.setSuffix(" bytes")
-        advanced_layout.addWidget(QLabel("Size Min:"), 1, 0)
-        advanced_layout.addWidget(self.size_min, 1, 1)
+        size_layout.addWidget(QLabel("Size Min:"), 0, 0)
+        size_layout.addWidget(self.size_min, 0, 1)
         
         self.size_max = QSpinBox()
         self.size_max.setMaximum(2147483647)
         self.size_max.setValue(2147483647)
         self.size_max.setSuffix(" bytes")
-        advanced_layout.addWidget(QLabel("Size Max:"), 1, 2)
-        advanced_layout.addWidget(self.size_max, 1, 3)
+        size_layout.addWidget(QLabel("Size Max:"), 1, 0)
+        size_layout.addWidget(self.size_max, 1, 1)
+        
+        # Size units selector
+        self.size_unit = QComboBox()
+        self.size_unit.addItems(["Bytes", "KB", "MB", "GB"])
+        self.size_unit.currentTextChanged.connect(self.update_size_units)
+        size_layout.addWidget(QLabel("Unit:"), 2, 0)
+        size_layout.addWidget(self.size_unit, 2, 1)
+        
+        scroll_layout.addWidget(size_group)
         
         # Date filters
+        date_group = QGroupBox("Date Filters")
+        date_layout = QGridLayout(date_group)
+        
+        self.date_column = QComboBox()
+        date_layout.addWidget(QLabel("Date Column:"), 0, 0)
+        date_layout.addWidget(self.date_column, 0, 1)
+        
         self.date_from = QDateTimeEdit()
         self.date_from.setDateTime(QDateTime.currentDateTime().addDays(-365))
-        advanced_layout.addWidget(QLabel("Date From:"), 2, 0)
-        advanced_layout.addWidget(self.date_from, 2, 1)
+        self.date_from.setCalendarPopup(True)
+        date_layout.addWidget(QLabel("Date From:"), 1, 0)
+        date_layout.addWidget(self.date_from, 1, 1)
         
         self.date_to = QDateTimeEdit()
         self.date_to.setDateTime(QDateTime.currentDateTime())
-        advanced_layout.addWidget(QLabel("Date To:"), 2, 2)
-        advanced_layout.addWidget(self.date_to, 2, 3)
+        self.date_to.setCalendarPopup(True)
+        date_layout.addWidget(QLabel("Date To:"), 2, 0)
+        date_layout.addWidget(self.date_to, 2, 1)
+        
+        scroll_layout.addWidget(date_group)
         
         # Attribute filters
-        attr_layout = QHBoxLayout()
-        self.hidden_cb = QCheckBox("Hidden")
-        self.system_cb = QCheckBox("System")
-        self.readonly_cb = QCheckBox("Read-only")
-        self.deleted_cb = QCheckBox("Deleted Only")
+        attr_group = QGroupBox("Attribute Filters")
+        attr_layout = QVBoxLayout(attr_group)
         
-        attr_layout.addWidget(self.hidden_cb)
-        attr_layout.addWidget(self.system_cb)
-        attr_layout.addWidget(self.readonly_cb)
+        self.is_directory_cb = QCheckBox("Directories Only")
+        self.has_ads_cb = QCheckBox("Has Alternate Data Streams")
+        self.is_ads_cb = QCheckBox("Is Alternate Data Stream")
+        self.deleted_cb = QCheckBox("Deleted Files Only (InUse=False)")
+        self.copied_cb = QCheckBox("Copied Files")
+        self.si_fn_cb = QCheckBox("SI < FN (Timeline Anomaly)")
+        
+        attr_layout.addWidget(self.is_directory_cb)
+        attr_layout.addWidget(self.has_ads_cb)
+        attr_layout.addWidget(self.is_ads_cb)
         attr_layout.addWidget(self.deleted_cb)
-        attr_layout.addStretch()
+        attr_layout.addWidget(self.copied_cb)
+        attr_layout.addWidget(self.si_fn_cb)
         
-        advanced_layout.addLayout(attr_layout, 3, 0, 1, 4)
+        scroll_layout.addWidget(attr_group)
         
-        # Apply filters button
+        # Filter buttons
+        button_layout = QHBoxLayout()
         apply_btn = QPushButton("Apply Filters")
         apply_btn.clicked.connect(self.apply_advanced_filters)
-        advanced_layout.addWidget(apply_btn, 4, 0, 1, 4)
+        clear_btn = QPushButton("Clear All")
+        clear_btn.clicked.connect(self.clear_filters)
         
-        scroll_layout.addWidget(advanced_group)
+        button_layout.addWidget(apply_btn)
+        button_layout.addWidget(clear_btn)
+        scroll_layout.addLayout(button_layout)
+        
+        # Filter summary
+        self.filter_summary = QTextEdit()
+        self.filter_summary.setMaximumHeight(80)
+        self.filter_summary.setPlaceholderText("Applied filters will be summarized here...")
+        scroll_layout.addWidget(QLabel("Active Filters:"))
+        scroll_layout.addWidget(self.filter_summary)
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        filter_layout.addWidget(scroll)
+        
+        # RIGHT PANEL: RESULTS
+        results_panel = QWidget()
+        results_layout = QVBoxLayout(results_panel)
+        
+        # Results header
+        results_header = QHBoxLayout()
+        self.results_count_label = QLabel("Results: 0")
+        results_header.addWidget(self.results_count_label)
+        results_header.addStretch()
+        
+        export_results_btn = QPushButton("Export Results")
+        export_results_btn.clicked.connect(self.export_filtered_results)
+        results_header.addWidget(export_results_btn)
+        
+        results_layout.addLayout(results_header)
         
         # Results table
-        results_group = QGroupBox("Search Results")
-        results_layout = QVBoxLayout(results_group)
-        
         self.search_results_table = QTableWidget()
+        self.search_results_table.setAlternatingRowColors(True)
+        self.search_results_table.setSortingEnabled(True)
         results_layout.addWidget(self.search_results_table)
         
-        scroll_layout.addWidget(results_group)
+        # Results details
+        self.results_details = QTextEdit()
+        self.results_details.setMaximumHeight(120)
+        self.results_details.setPlaceholderText("Click on a row to see detailed information...")
+        results_layout.addWidget(self.results_details)
         
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
+        # Add panels to splitter
+        main_splitter.addWidget(filter_panel)
+        main_splitter.addWidget(results_panel)
+        
+        # Set initial splitter sizes
+        main_splitter.setSizes([400, 1000])
+        
+        # Connect table selection to show details
+        self.search_results_table.cellClicked.connect(self.show_row_details)
     
     def create_timeline_tab(self):
         """Timeline analysis tab"""
         timeline_tab = QWidget()
-        self.tab_widget.addTab(timeline_tab, "📈 Timeline")
+        self.tab_widget.addTab(timeline_tab, "Timeline")
         layout = QVBoxLayout(timeline_tab)
         
         # Controls
@@ -435,7 +541,7 @@ class MFTAnalyzer(QMainWindow):
     def create_deleted_files_tab(self):
         """Deleted files analysis tab"""
         deleted_tab = QWidget()
-        self.tab_widget.addTab(deleted_tab, "🗑️ Deleted Files")
+        self.tab_widget.addTab(deleted_tab, "Deleted Files")
         layout = QVBoxLayout(deleted_tab)
         
         # Controls
@@ -464,7 +570,7 @@ class MFTAnalyzer(QMainWindow):
     def create_analysis_tab(self):
         """Statistical analysis tab"""
         analysis_tab = QWidget()
-        self.tab_widget.addTab(analysis_tab, "📊 Analysis")
+        self.tab_widget.addTab(analysis_tab, "Analysis")
         layout = QVBoxLayout(analysis_tab)
         
         # Analysis controls
@@ -498,7 +604,7 @@ class MFTAnalyzer(QMainWindow):
     def create_export_tab(self):
         """Export and reporting tab"""
         export_tab = QWidget()
-        self.tab_widget.addTab(export_tab, "📤 Export")
+        self.tab_widget.addTab(export_tab, "Export")
         layout = QVBoxLayout(export_tab)
         
         # Export options
@@ -544,6 +650,16 @@ class MFTAnalyzer(QMainWindow):
         self.db_path = self.temp_db.name
         self.temp_db.close()
     
+    def update_size_units(self):
+        """Update size input units"""
+        unit = self.size_unit.currentText()
+        multiplier = {'Bytes': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3}
+        
+        if unit in multiplier:
+            suffix = f" {unit.lower()}"
+            self.size_min.setSuffix(suffix)
+            self.size_max.setSuffix(suffix)
+    
     def load_csv(self):
         """Load CSV file with progress bar"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -551,16 +667,7 @@ class MFTAnalyzer(QMainWindow):
         )
         
         if file_path:
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(0)
-            self.status_bar.showMessage("Loading CSV file...")
-            
-            # Start loading in background thread
-            self.loader = DataLoader(file_path)
-            self.loader.progress.connect(self.progress_bar.setValue)
-            self.loader.finished.connect(self.on_data_loaded)
-            self.loader.error.connect(self.on_load_error)
-            self.loader.start()
+            self.load_csv_file(file_path)
     
     def on_data_loaded(self, df):
         """Handle successful data loading"""
@@ -584,46 +691,6 @@ class MFTAnalyzer(QMainWindow):
         self.status_bar.showMessage("Error loading file")
         QMessageBox.critical(self, "Error", f"Error loading CSV file:\n{error_msg}")
     
-    def update_table_view(self):
-        """Update the main table view"""
-        if self.filtered_df.empty:
-            return
-        
-        # Update main table
-        self.table.setRowCount(len(self.filtered_df))
-        self.table.setColumnCount(len(self.filtered_df.columns))
-        self.table.setHorizontalHeaderLabels(list(self.filtered_df.columns))
-        
-        # Populate table (show first 1000 rows for performance)
-        display_rows = min(1000, len(self.filtered_df))
-        for i in range(display_rows):
-            for j, col in enumerate(self.filtered_df.columns):
-                value = self.filtered_df.iloc[i, j]
-                if pd.isna(value):
-                    value = ""
-                item = QTableWidgetItem(str(value))
-                
-                # Highlight deleted files
-                if 'IsDeleted' in self.filtered_df.columns and self.filtered_df.iloc[i]['IsDeleted']:
-                    item.setBackground(QColor(255, 200, 200))
-                
-                self.table.setItem(i, j, item)
-        
-        # Auto-resize columns
-        self.table.resizeColumnsToContents()
-        
-        if display_rows < len(self.filtered_df):
-            self.status_bar.showMessage(f"Showing first {display_rows} of {len(self.filtered_df)} records")
-    
-    def update_record_counts(self):
-        """Update record count labels"""
-        self.records_label.setText(f"Records: {len(self.df)}")
-        self.filtered_label.setText(f"Filtered: {len(self.filtered_df)}")
-        
-        if 'IsDeleted' in self.df.columns:
-            deleted_count = self.df['IsDeleted'].sum()
-            self.deleted_count_label.setText(f"Deleted Files: {deleted_count}")
-    
     def populate_filter_options(self):
         """Populate filter dropdown options based on loaded data"""
         if self.df.empty:
@@ -631,9 +698,21 @@ class MFTAnalyzer(QMainWindow):
         
         # Populate extension filter
         self.extension_filter.clear()
-        if 'FileName' in self.df.columns:
+        self.extension_filter.addItem("")  # Add empty option
+        if 'Extension' in self.df.columns:
+            extensions = self.df['Extension'].dropna().unique()
+            self.extension_filter.addItems(sorted(extensions))
+        elif 'FileName' in self.df.columns:
+            # Extract extensions from filename if Extension column doesn't exist
             extensions = self.df['FileName'].str.extract(r'\.([^.]+)$')[0].dropna().unique()
             self.extension_filter.addItems(sorted(extensions))
+        
+        # Populate date column filter
+        self.date_column.clear()
+        timestamp_cols = [col for col in self.df.columns if any(x in col.lower() 
+                         for x in ['created', 'modified', 'access', 'change'])]
+        if timestamp_cols:
+            self.date_column.addItems(timestamp_cols)
     
     def load_data_to_db(self):
         """Load data to SQLite for fast queries"""
@@ -643,7 +722,7 @@ class MFTAnalyzer(QMainWindow):
             
             # Create indexes for common search fields
             cursor = conn.cursor()
-            index_columns = ['FileName', 'ParentPath', 'RecordNumber']
+            index_columns = ['FileName', 'ParentPath', 'EntryNumber']
             for col in index_columns:
                 if col in self.df.columns:
                     try:
@@ -670,65 +749,159 @@ class MFTAnalyzer(QMainWindow):
             
             for col in search_columns:
                 if col in self.df.columns:
-                    mask |= self.df[col].astype(str).str.lower().str.contains(search_text, na=False)
+                    mask |= self.df[col].astype(str).str.lower().str.contains(search_text, na=False, regex=False)
             
             self.filtered_df = self.df[mask]
         
-        self.update_table_view()
+        self.update_search_results()
         self.update_record_counts()
+        self.update_filter_summary()
     
     def apply_advanced_filters(self):
-        """Apply advanced filters"""
+        """Apply advanced filters with improved logic"""
         if self.df.empty:
             return
         
-        filtered = self.df.copy()
-        
-        # Filename filter
-        filename_filter = self.filename_filter.text()
-        if filename_filter:
-            pattern = filename_filter.replace('*', '.*').replace('?', '.')
-            if 'FileName' in filtered.columns:
-                filtered = filtered[filtered['FileName'].str.match(pattern, case=False, na=False)]
-        
-        # Extension filter
-        ext_filter = self.extension_filter.currentText()
-        if ext_filter and 'FileName' in filtered.columns:
-            filtered = filtered[filtered['FileName'].str.endswith(f'.{ext_filter}', na=False)]
-        
-        # Size filters
-        if 'Size' in filtered.columns:
+        try:
+            filtered = self.df.copy()
+            active_filters = []
+            
+            # Quick search filter
+            search_text = self.quick_search.text().strip()
+            if search_text:
+                mask = pd.Series([False] * len(filtered))
+                search_columns = ['FileName', 'ParentPath', 'FullPath']
+                
+                for col in search_columns:
+                    if col in filtered.columns:
+                        mask |= filtered[col].astype(str).str.lower().str.contains(search_text.lower(), na=False, regex=False)
+                
+                filtered = filtered[mask]
+                active_filters.append(f"Text search: '{search_text}'")
+            
+            # Filename pattern filter
+            filename_pattern = self.filename_filter.text().strip()
+            if filename_pattern and 'FileName' in filtered.columns:
+                try:
+                    # Convert wildcard pattern to regex
+                    import re
+                    pattern = filename_pattern.replace('*', '.*').replace('?', '.')
+                    filtered = filtered[filtered['FileName'].astype(str).str.match(pattern, case=False, na=False)]
+                    active_filters.append(f"Filename pattern: '{filename_pattern}'")
+                except Exception as e:
+                    QMessageBox.warning(self, "Filter Error", f"Invalid filename pattern: {str(e)}")
+            
+            # Extension filter
+            ext_filter = self.extension_filter.currentText().strip()
+            if ext_filter:
+                if 'Extension' in filtered.columns:
+                    filtered = filtered[filtered['Extension'].astype(str).str.lower() == ext_filter.lower()]
+                elif 'FileName' in filtered.columns:
+                    filtered = filtered[filtered['FileName'].astype(str).str.lower().str.endswith(f'.{ext_filter.lower()}', na=False)]
+                active_filters.append(f"Extension: '.{ext_filter}'")
+            
+            # Path filter
+            path_filter = self.path_filter.text().strip()
+            if path_filter and 'ParentPath' in filtered.columns:
+                filtered = filtered[filtered['ParentPath'].astype(str).str.lower().str.contains(path_filter.lower(), na=False, regex=False)]
+                active_filters.append(f"Path contains: '{path_filter}'")
+            
+            # Size filters
             size_min = self.size_min.value()
             size_max = self.size_max.value()
-            filtered = filtered[(filtered['Size'] >= size_min) & (filtered['Size'] <= size_max)]
+            unit = self.size_unit.currentText()
+            multiplier = {'Bytes': 1, 'KB': 1024, 'MB': 1024**2, 'GB': 1024**3}
+            
+            if 'FileSize' in filtered.columns:
+                actual_min = size_min * multiplier.get(unit, 1)
+                actual_max = size_max * multiplier.get(unit, 1)
+                
+                if size_min > 0:
+                    filtered = filtered[filtered['FileSize'] >= actual_min]
+                    active_filters.append(f"Size >= {size_min} {unit}")
+                
+                if size_max < 2147483647:
+                    filtered = filtered[filtered['FileSize'] <= actual_max]
+                    active_filters.append(f"Size <= {size_max} {unit}")
+            
+            # Date filters
+            date_col = self.date_column.currentText()
+            if date_col and date_col in filtered.columns:
+                try:
+                    date_from = self.date_from.dateTime().toPyDateTime()
+                    date_to = self.date_to.dateTime().toPyDateTime()
+                    
+                    # Convert column to datetime if not already
+                    filtered[date_col] = pd.to_datetime(filtered[date_col], errors='coerce')
+                    
+                    # Apply date range filter
+                    date_mask = (filtered[date_col] >= date_from) & (filtered[date_col] <= date_to)
+                    filtered = filtered[date_mask]
+                    
+                    active_filters.append(f"Date ({date_col}): {date_from.strftime('%Y-%m-%d')} to {date_to.strftime('%Y-%m-%d')}")
+                except Exception as e:
+                    QMessageBox.warning(self, "Date Filter Error", f"Error applying date filter: {str(e)}")
+            
+            # Attribute filters
+            if self.is_directory_cb.isChecked() and 'IsDirectory' in filtered.columns:
+                filtered = filtered[filtered['IsDirectory'] == True]
+                active_filters.append("Directories only")
+            
+            if self.has_ads_cb.isChecked() and 'HasAds' in filtered.columns:
+                filtered = filtered[filtered['HasAds'] == True]
+                active_filters.append("Has ADS")
+            
+            if self.is_ads_cb.isChecked() and 'IsAds' in filtered.columns:
+                filtered = filtered[filtered['IsAds'] == True]
+                active_filters.append("Is ADS")
+            
+            if self.deleted_cb.isChecked() and 'InUse' in filtered.columns:
+                filtered = filtered[filtered['InUse'] == False]
+                active_filters.append("Deleted files (InUse=False)")
+            
+            if self.copied_cb.isChecked() and 'Copied' in filtered.columns:
+                filtered = filtered[filtered['Copied'] == True]
+                active_filters.append("Copied files")
+            
+            if self.si_fn_cb.isChecked() and 'SI<FN' in filtered.columns:
+                filtered = filtered[filtered['SI<FN'] == True]
+                active_filters.append("SI < FN anomaly")
+            
+            self.filtered_df = filtered
+            self.update_search_results()
+            self.update_record_counts()
+            self.update_filter_summary(active_filters)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Filter Error", f"Error applying filters: {str(e)}")
+    
+    def update_filter_summary(self, active_filters=None):
+        """Update the filter summary display"""
+        if active_filters is None:
+            active_filters = []
         
-        # Attribute filters
-        if self.hidden_cb.isChecked() and 'Hidden' in filtered.columns:
-            filtered = filtered[filtered['Hidden'] == True]
-        
-        if self.system_cb.isChecked() and 'System' in filtered.columns:
-            filtered = filtered[filtered['System'] == True]
-        
-        if self.deleted_cb.isChecked() and 'IsDeleted' in filtered.columns:
-            filtered = filtered[filtered['IsDeleted'] == True]
-        
-        self.filtered_df = filtered
-        self.update_table_view()
-        self.update_search_results()
-        self.update_record_counts()
+        if not active_filters:
+            self.filter_summary.setPlainText("No filters applied")
+        else:
+            summary = "Active filters:\n" + "\n".join(f"• {f}" for f in active_filters)
+            self.filter_summary.setPlainText(summary)
     
     def update_search_results(self):
-        """Update search results table"""
+        """Update search results table with improved column selection"""
         if self.filtered_df.empty:
             self.search_results_table.setRowCount(0)
+            self.results_count_label.setText("Results: 0")
             return
         
-        # Show key columns in search results
-        key_columns = ['FileName', 'FullPath', 'Size', 'IsDeleted']
+        # Select key columns to display
+        key_columns = [
+            'EntryNumber', 'FileName', 'ParentPath', 'FileSize', 
+            'InUse', 'IsDirectory', 'Created0x10', 'LastModified0x10'
+        ]
         available_columns = [col for col in key_columns if col in self.filtered_df.columns]
         
         if not available_columns:
-            available_columns = list(self.filtered_df.columns[:5])  # First 5 columns
+            available_columns = list(self.filtered_df.columns[:8])  # First 8 columns
         
         display_data = self.filtered_df[available_columns]
         
@@ -736,16 +909,112 @@ class MFTAnalyzer(QMainWindow):
         self.search_results_table.setColumnCount(len(available_columns))
         self.search_results_table.setHorizontalHeaderLabels(available_columns)
         
-        # Populate search results (limit to 500 for performance)
-        display_rows = min(500, len(display_data))
+        # Populate search results (limit to 1000 for performance)
+        display_rows = min(1000, len(display_data))
         for i in range(display_rows):
             for j, col in enumerate(available_columns):
                 value = display_data.iloc[i, j]
                 if pd.isna(value):
                     value = ""
-                self.search_results_table.setItem(i, j, QTableWidgetItem(str(value)))
+                
+                item = QTableWidgetItem(str(value))
+                
+                # Highlight deleted files
+                if 'InUse' in display_data.columns and not display_data.iloc[i]['InUse']:
+                    item.setBackground(QColor(255, 200, 200))
+                
+                self.search_results_table.setItem(i, j, item)
         
-        self.search_results_table.resizeColumnsToContents()
+        # Auto-resize columns
+        header = self.search_results_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        
+        # Update results count
+        total_results = len(self.filtered_df)
+        showing = min(display_rows, total_results)
+        self.results_count_label.setText(f"Results: {total_results:,} (showing {showing:,})")
+        
+        if display_rows < len(self.filtered_df):
+            self.status_bar.showMessage(f"Search results: showing first {display_rows:,} of {len(self.filtered_df):,} records")
+    
+    def show_row_details(self, row, column):
+        """Show detailed information for selected row"""
+        if row >= len(self.filtered_df):
+            return
+        
+        selected_row = self.filtered_df.iloc[row]
+        
+        details = "<h4>Record Details</h4><table border='1'>"
+        for col, value in selected_row.items():
+            if pd.notna(value):
+                details += f"<tr><td><b>{col}</b></td><td>{value}</td></tr>"
+        details += "</table>"
+        
+        self.results_details.setHtml(details)
+    
+    def export_filtered_results(self):
+        """Export current filtered results"""
+        if self.filtered_df.empty:
+            QMessageBox.warning(self, "Warning", "No filtered results to export.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Filtered Results", f"filtered_mft_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", 
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;JSON Files (*.json)"
+        )
+        
+        if file_path:
+            try:
+                if file_path.endswith('.csv'):
+                    self.filtered_df.to_csv(file_path, index=False)
+                elif file_path.endswith('.xlsx'):
+                    self.filtered_df.to_excel(file_path, index=False)
+                elif file_path.endswith('.json'):
+                    self.filtered_df.to_json(file_path, orient='records', date_format='iso')
+                
+                QMessageBox.information(self, "Success", f"Filtered results exported to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Error exporting results: {str(e)}")
+    
+    def update_table_view(self):
+        """Update the main table view"""
+        if self.filtered_df.empty:
+            return
+        
+        # Update main table
+        self.table.setRowCount(len(self.filtered_df))
+        self.table.setColumnCount(len(self.filtered_df.columns))
+        self.table.setHorizontalHeaderLabels(list(self.filtered_df.columns))
+        
+        # Populate table (show first 1000 rows for performance)
+        display_rows = min(1000, len(self.filtered_df))
+        for i in range(display_rows):
+            for j, col in enumerate(self.filtered_df.columns):
+                value = self.filtered_df.iloc[i, j]
+                if pd.isna(value):
+                    value = ""
+                item = QTableWidgetItem(str(value))
+                
+                # Highlight deleted files based on InUse flag
+                if 'InUse' in self.filtered_df.columns and not self.filtered_df.iloc[i]['InUse']:
+                    item.setBackground(QColor(255, 200, 200))
+                
+                self.table.setItem(i, j, item)
+        
+        # Auto-resize columns
+        self.table.resizeColumnsToContents()
+        
+        if display_rows < len(self.filtered_df):
+            self.status_bar.showMessage(f"Showing first {display_rows} of {len(self.filtered_df)} records")
+    
+    def update_record_counts(self):
+        """Update record count labels"""
+        self.records_label.setText(f"Records: {len(self.df):,}")
+        self.filtered_label.setText(f"Filtered: {len(self.filtered_df):,}")
+        
+        if 'InUse' in self.df.columns:
+            deleted_count = (~self.df['InUse']).sum()
+            self.deleted_count_label.setText(f"Deleted Files: {deleted_count:,}")
     
     def scan_deleted_files(self):
         """Scan and display deleted files"""
@@ -753,18 +1022,18 @@ class MFTAnalyzer(QMainWindow):
             QMessageBox.warning(self, "Warning", "No data loaded.")
             return
         
-        if 'IsDeleted' not in self.df.columns:
-            QMessageBox.information(self, "Info", "No deletion status column found in data.")
+        if 'InUse' not in self.df.columns:
+            QMessageBox.information(self, "Info", "No InUse column found in data.")
             return
         
-        deleted_files = self.df[self.df['IsDeleted'] == True]
+        deleted_files = self.df[self.df['InUse'] == False]
         
         if deleted_files.empty:
             QMessageBox.information(self, "Info", "No deleted files found.")
             return
         
         # Update deleted files table
-        key_columns = ['FileName', 'ParentPath', 'Size', 'Created0x10', 'Modified0x10']
+        key_columns = ['EntryNumber', 'FileName', 'ParentPath', 'FileSize', 'Created0x10', 'LastModified0x10']
         available_columns = [col for col in key_columns if col in deleted_files.columns]
         
         self.deleted_files_table.setRowCount(len(deleted_files))
@@ -782,7 +1051,7 @@ class MFTAnalyzer(QMainWindow):
                 self.deleted_files_table.setItem(i, j, item)
         
         self.deleted_files_table.resizeColumnsToContents()
-        self.deleted_count_label.setText(f"Deleted Files: {len(deleted_files)}")
+        self.deleted_count_label.setText(f"Deleted Files: {len(deleted_files):,}")
     
     def generate_timeline(self):
         """Generate timeline analysis"""
@@ -795,7 +1064,7 @@ class MFTAnalyzer(QMainWindow):
         try:
             # Find timestamp columns
             timestamp_cols = [col for col in self.df.columns if any(x in col.lower() 
-                             for x in ['created', 'modified', 'accessed', 'time'])]
+                             for x in ['created', 'modified', 'access', 'change'])]
             
             if not timestamp_cols:
                 QMessageBox.warning(self, "Warning", "No timestamp columns found.")
@@ -934,44 +1203,37 @@ class MFTAnalyzer(QMainWindow):
     
     def analyze_file_types(self):
         """Analyze file type distribution"""
-        if 'FileName' not in self.df.columns:
-            return "<p>FileName column not found.</p>"
+        result = "<h3>File Type Distribution (Top 20)</h3>"
         
-        # Extract file extensions
-        extensions = self.df['FileName'].str.extract(r'\.([^.]+)')[0].fillna('No Extension')
+        if 'Extension' in self.df.columns:
+            extensions = self.df['Extension'].fillna('No Extension')
+        elif 'FileName' in self.df.columns:
+            extensions = self.df['FileName'].str.extract(r'\.([^.]+)')[0].fillna('No Extension')
+        else:
+            return "<p>No filename or extension data found.</p>"
+        
         ext_counts = extensions.value_counts().head(20)
         
-        result = "<h3>File Type Distribution (Top 20)</h3><table border='1'>"
+        result += "<table border='1'>"
         result += "<tr><th>Extension</th><th>Count</th><th>Percentage</th></tr>"
         
         total_files = len(self.df)
         for ext, count in ext_counts.items():
             percentage = (count / total_files) * 100
-            result += f"<tr><td>.{ext}</td><td>{count:,}</td><td>{percentage:.2f}%</td></tr>"
+            ext_display = ext if ext != 'No Extension' else 'No Extension'
+            if ext != 'No Extension':
+                ext_display = f".{ext}"
+            result += f"<tr><td>{ext_display}</td><td>{count:,}</td><td>{percentage:.2f}%</td></tr>"
         
         result += "</table>"
-        
-        # Create visualization
-        fig = px.pie(
-            values=ext_counts.values,
-            names=[f'.{ext}' for ext in ext_counts.index],
-            title="File Type Distribution"
-        )
-        
-        chart_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False)
-        chart_file.write(fig.to_html(include_plotlyjs='cdn'))
-        chart_file.close()
-        
-        result += f"<p><a href='file://{chart_file.name}' target='_blank'>View Interactive Chart</a></p>"
-        
         return result
     
     def analyze_file_sizes(self):
         """Analyze file size distribution"""
-        if 'Size' not in self.df.columns:
-            return "<p>Size column not found.</p>"
+        if 'FileSize' not in self.df.columns:
+            return "<p>FileSize column not found.</p>"
         
-        sizes = self.df['Size'].dropna()
+        sizes = self.df['FileSize'].dropna()
         
         result = "<h3>File Size Analysis</h3>"
         result += f"""
@@ -986,27 +1248,12 @@ class MFTAnalyzer(QMainWindow):
         </table>
         """
         
-        # Size distribution categories
-        size_categories = pd.cut(sizes, 
-                                bins=[0, 1024, 1024**2, 1024**3, float('inf')],
-                                labels=['< 1KB', '1KB - 1MB', '1MB - 1GB', '> 1GB'])
-        size_dist = size_categories.value_counts()
-        
-        result += "<h4>Size Distribution</h4><table border='1'>"
-        result += "<tr><th>Size Range</th><th>Count</th><th>Percentage</th></tr>"
-        
-        for category, count in size_dist.items():
-            percentage = (count / len(sizes)) * 100
-            result += f"<tr><td>{category}</td><td>{count:,}</td><td>{percentage:.2f}%</td></tr>"
-        
-        result += "</table>"
-        
         return result
     
     def analyze_timestamps(self):
         """Analyze timestamp patterns"""
         timestamp_cols = [col for col in self.df.columns if any(x in col.lower() 
-                         for x in ['created', 'modified', 'accessed', 'time'])]
+                         for x in ['created', 'modified', 'access', 'change'])]
         
         if not timestamp_cols:
             return "<p>No timestamp columns found.</p>"
@@ -1029,60 +1276,39 @@ class MFTAnalyzer(QMainWindow):
             except Exception as e:
                 result += f"<p>Error analyzing {col}: {str(e)}</p>"
         
-        # Timestomp detection (compare SI vs FN timestamps)
-        si_created = 'SI_Created' if 'SI_Created' in self.df.columns else None
-        fn_created = 'FN_Created' if 'FN_Created' in self.df.columns else None
-        
-        if si_created and fn_created:
-            si_times = pd.to_datetime(self.df[si_created], errors='coerce')
-            fn_times = pd.to_datetime(self.df[fn_created], errors='coerce')
-            
-            mismatches = ((si_times != fn_times) & si_times.notna() & fn_times.notna()).sum()
-            total_comparable = (si_times.notna() & fn_times.notna()).sum()
-            
-            if total_comparable > 0:
-                mismatch_rate = (mismatches / total_comparable) * 100
-                result += f"""
-                <h4>Timestamp Anomaly Detection</h4>
-                <ul>
-                    <li>SI vs FN Creation Time Mismatches: {mismatches:,} ({mismatch_rate:.2f}%)</li>
-                    <li>Potential Timestomping Indicators: {mismatches:,} files</li>
-                </ul>
-                """
-        
         return result
     
     def analyze_attributes(self):
         """Analyze file attributes"""
-        attr_columns = [col for col in self.df.columns if col.lower() in 
-                       ['hidden', 'system', 'readonly', 'archive', 'compressed', 'encrypted']]
-        
-        if not attr_columns:
-            return "<p>No attribute columns found.</p>"
-        
         result = "<h3>File Attributes Analysis</h3>"
         result += "<table border='1'><tr><th>Attribute</th><th>Count</th><th>Percentage</th></tr>"
         
         total_files = len(self.df)
-        for col in attr_columns:
-            try:
-                count = self.df[col].sum() if self.df[col].dtype == 'bool' else len(self.df[self.df[col] == True])
-                percentage = (count / total_files) * 100
-                result += f"<tr><td>{col}</td><td>{count:,}</td><td>{percentage:.2f}%</td></tr>"
-            except:
-                result += f"<tr><td>{col}</td><td>Error</td><td>-</td></tr>"
+        
+        # Check various boolean attributes
+        bool_attrs = ['InUse', 'IsDirectory', 'HasAds', 'IsAds', 'Copied', 'SI<FN', 'uSecZeros']
+        
+        for attr in bool_attrs:
+            if attr in self.df.columns:
+                try:
+                    if self.df[attr].dtype == 'bool':
+                        count = self.df[attr].sum()
+                        percentage = (count / total_files) * 100
+                        result += f"<tr><td>{attr}</td><td>{count:,}</td><td>{percentage:.2f}%</td></tr>"
+                except:
+                    result += f"<tr><td>{attr}</td><td>Error</td><td>-</td></tr>"
         
         result += "</table>"
         
         # Deleted files analysis
-        if 'IsDeleted' in self.df.columns:
-            deleted_count = self.df['IsDeleted'].sum()
+        if 'InUse' in self.df.columns:
+            deleted_count = (~self.df['InUse']).sum()
             deleted_percentage = (deleted_count / total_files) * 100
             result += f"""
             <h4>Deletion Analysis</h4>
             <ul>
-                <li>Deleted Files: {deleted_count:,} ({deleted_percentage:.2f}%)</li>
-                <li>Active Files: {total_files - deleted_count:,} ({100 - deleted_percentage:.2f}%)</li>
+                <li>Deleted Files (InUse=False): {deleted_count:,} ({deleted_percentage:.2f}%)</li>
+                <li>Active Files (InUse=True): {total_files - deleted_count:,} ({100 - deleted_percentage:.2f}%)</li>
             </ul>
             """
         
@@ -1105,17 +1331,6 @@ class MFTAnalyzer(QMainWindow):
         
         result += "</table>"
         
-        # Directory depth analysis
-        depths = self.df['ParentPath'].str.count('\\')
-        result += f"""
-        <h4>Directory Depth Statistics</h4>
-        <ul>
-            <li>Maximum Depth: {depths.max()} levels</li>
-            <li>Average Depth: {depths.mean():.1f} levels</li>
-            <li>Most Common Depth: {depths.mode().iloc[0] if not depths.mode().empty else 'N/A'} levels</li>
-        </ul>
-        """
-        
         return result
     
     def export_chart(self):
@@ -1136,8 +1351,8 @@ class MFTAnalyzer(QMainWindow):
             export_df = self.df
         elif data_type == "Filtered Data":
             export_df = self.filtered_df
-        elif data_type == "Deleted Files Only" and 'IsDeleted' in self.df.columns:
-            export_df = self.df[self.df['IsDeleted'] == True]
+        elif data_type == "Deleted Files Only" and 'InUse' in self.df.columns:
+            export_df = self.df[self.df['InUse'] == False]
         else:
             export_df = self.df
         
@@ -1189,7 +1404,7 @@ class MFTAnalyzer(QMainWindow):
                 <h2>Summary</h2>
                 <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <p>Total Records: {len(df):,}</p>
-                <p>Deleted Files: {df['IsDeleted'].sum() if 'IsDeleted' in df.columns else 'N/A'}</p>
+                <p>Deleted Files: {(~df['InUse']).sum() if 'InUse' in df.columns else 'N/A'}</p>
             </div>
             
             <h2>Data Sample (First 100 Records)</h2>
@@ -1211,115 +1426,3 @@ class MFTAnalyzer(QMainWindow):
         timestamps = self.analyze_timestamps()
         attributes = self.analyze_attributes()
         directory = self.analyze_directory_structure()
-        
-        # Combine into full report
-        full_report = f"""
-        <html>
-        <head>
-            <title>Complete MFT Analysis Report</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                .section {{ margin: 30px 0; border-bottom: 2px solid #007acc; }}
-            </style>
-        </head>
-        <body>
-            <h1>Complete MFT Analysis Report</h1>
-            <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>Total Records Analyzed: {len(self.df):,}</p>
-            
-            <div class="section">{file_types}</div>
-            <div class="section">{sizes}</div>
-            <div class="section">{timestamps}</div>
-            <div class="section">{attributes}</div>
-            <div class="section">{directory}</div>
-        </body>
-        </html>
-        """
-        
-        # Save and show report
-        report_file = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False)
-        report_file.write(full_report)
-        report_file.close()
-        
-        webbrowser.open(f'file://{report_file.name}')
-        
-        # Update export preview
-        self.export_preview.setHtml(f"<p>Full report generated and opened in browser.</p><p>File: {report_file.name}</p>")
-    
-    def refresh_view(self):
-        """Refresh the current view"""
-        self.update_table_view()
-        self.update_record_counts()
-    
-    def clear_filters(self):
-        """Clear all filters and show all data"""
-        if not self.df.empty:
-            self.filtered_df = self.df.copy()
-            
-            # Clear filter controls
-            self.quick_search.clear()
-            self.filename_filter.clear()
-            self.extension_filter.setCurrentText("")
-            self.size_min.setValue(0)
-            self.size_max.setValue(2147483647)
-            self.hidden_cb.setChecked(False)
-            self.system_cb.setChecked(False)
-            self.readonly_cb.setChecked(False)
-            self.deleted_cb.setChecked(False)
-            
-            self.update_table_view()
-            self.update_record_counts()
-    
-    def quick_analysis(self):
-        """Perform quick analysis and show summary"""
-        if self.df.empty:
-            QMessageBox.warning(self, "Warning", "No data loaded.")
-            return
-        
-        summary = f"""
-        Quick Analysis Summary:
-        
-        Total Records: {len(self.df):,}
-        Total Size: {self.df['Size'].sum() / (1024**3):.2f} GB (if Size column exists)
-        Deleted Files: {self.df['IsDeleted'].sum() if 'IsDeleted' in self.df.columns else 'N/A'}
-        
-        Most Common Extensions:
-        """
-        
-        if 'FileName' in self.df.columns:
-            extensions = self.df['FileName'].str.extract(r'\.([^.]+)')[0].value_counts().head(5)
-            for ext, count in extensions.items():
-                summary += f"\n.{ext}: {count:,} files"
-        
-        QMessageBox.information(self, "Quick Analysis", summary)
-    
-    def closeEvent(self, event):
-        """Clean up when closing application"""
-        try:
-            if self.db_path and os.path.exists(self.db_path):
-                os.unlink(self.db_path)
-        except:
-            pass
-        event.accept()
-
-def main():
-    """Main application entry point"""
-    app = QApplication(sys.argv)
-    
-    # Set application properties
-    app.setApplicationName("MFT CSV Analyzer")
-    app.setApplicationVersion("1.0")
-    app.setOrganizationName("Digital Forensics Tools")
-    
-    # Create and show main window
-    analyzer = MFTAnalyzer()   # must be subclass of QMainWindow/QWidget
-    analyzer.show()
-    
-    # Start event loop
-    sys.exit(app.exec_())
-
-if __name__ == '__main__':
-    main()
