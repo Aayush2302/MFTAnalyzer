@@ -139,7 +139,7 @@ class DataLoader(QThread):
         return df
 
 class MFTAnalyzer(QMainWindow):
-    def __init__(self):
+    def __init__(self, csv_file=None):
         super().__init__()
         self.df = pd.DataFrame()
         self.filtered_df = pd.DataFrame()
@@ -148,6 +148,28 @@ class MFTAnalyzer(QMainWindow):
         
         self.init_ui()
         self.setup_database()
+        
+    
+    def load_csv_file(self, file_path):
+        """Load a specific CSV file programmatically"""
+        if not os.path.exists(file_path):
+            QMessageBox.critical(self, "Error", f"File not found: {file_path}")
+            return
+        
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.status_bar.showMessage("Loading CSV file...")
+        
+        # Start loading in background thread
+        self.loader = DataLoader(file_path)
+        self.loader.progress.connect(self.progress_bar.setValue)
+        self.loader.finished.connect(self.on_data_loaded)
+        self.loader.error.connect(self.on_load_error)
+        self.loader.start()
+        
+        # If a CSV file is provided, load it automatically
+        if csv_file:
+            self.load_csv_file(csv_file)
         
     def init_ui(self):
         self.setWindowTitle("MFT CSV Analyzer - Professional Edition")
