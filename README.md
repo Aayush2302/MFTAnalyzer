@@ -60,6 +60,8 @@ Both tools are bundled with the application inside the `tools/` directory.
 
 - Download `MFTAnalyzer.exe` and Open with `Run as Administrator`
 
+---
+
 ## 🛠️ Troubleshooting
 
 If you face issues running **MFT Analyzer.exe**, check the following:
@@ -68,28 +70,48 @@ If you face issues running **MFT Analyzer.exe**, check the following:
 RawCopy requires direct disk access.  
 Always launch `MFTAnalyzer.exe` with **administrator privileges**:  
 - Right-click → **Run as Administrator**  
-- Or set it permanently via:  
+- Or set permanently via:  
   - Right-click `MFTAnalyzer.exe` → **Properties** → **Compatibility** →  
     Check **Run this program as administrator**
+    
 
----
+### 2. Verify .NET Runtime
 
-### 2. Install .NET Framework 4.6 or Higher
-`MFTECmd.exe` requires **.NET Framework 4.6+**.  
+#### Check .NET Runtime (Core)
+Run in **PowerShell**:
+```powershell
+dotnet --list-runtimes
+```
+Expected output should include:
 
-#### Check if it’s already installed
-Open **Command Prompt** and run:
+`Microsoft.NETCore.App 9.0.x [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]`
+
+### 3. Check .NET Framework (legacy)
+
+Run in CMD:
 ```cmd
 reg query "HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" /v Release
 ```
 
-Install .NET 4.8 (recommended)
-Run in PowerShell (Admin):
-```cmd
-curl.exe -L -o dotnet48.exe https://download.microsoft.com/download/9/5/E/95E1E9F9-4F2F-46F9-8E9E-4E96D5B8BC6B/ndp48-x86-x64-allos-enu.exe
-start /wait dotnet48.exe /quiet /norestart
-```
+`394802` or higher → ✅ .NET 4.6+ installed
+
+`528040` or higher → ✅ .NET 4.8 installed
+
+### Install if missing
+
+[Install .NET Framework 4.8](https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48)
+
+[Install .NET Runtime 9.0 (x64)](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-9.0.9-windows-x64-installer?cid=getdotnetcore)
+
+[Install VC++ Runtime 2015–2019 (x64)](https://aka.ms/vs/16/release/vc_redist.x64.exe)
+
 ---
+## 📷 Screenshots
+
+### Dashboard
+![](/image/01.png)
+![](/image/02.png)
+![](/image/03.png)
 
 ## 📜 License & Disclaimer
 
